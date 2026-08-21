@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>BloomGuard — Membership Filter Console</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+
+<div class="scanline"></div>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="brand-mark">◆</span>
+    <span class="brand-name">BLOOMGUARD</span>
+  </div>
+  <div class="brand-sub">probabilistic membership console</div>
+  <div class="status" id="status-indicator">
+    <span class="status-dot"></span> live
+  </div>
+</header>
+
+<main>
+
+  <!-- HERO: the live bit array -->
+  <section class="hero">
+    <div class="hero-left">
+      <div class="eyebrow">the filter, in real time</div>
+      <h1>Every bit you see is a hash landing somewhere.</h1>
+      <p class="hero-copy">
+        BloomGuard answers <em>"have I seen this before?"</em> using a fixed
+        array of bits and <span id="k-inline">—</span> independent hashes per item.
+        No item is ever stored — only its fingerprint of set bits.
+      </p>
+      <div class="hero-metrics">
+        <div class="metric">
+          <div class="metric-label">array size (m)</div>
+          <div class="metric-value" id="metric-m">—</div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">hash count (k)</div>
+          <div class="metric-value" id="metric-k">—</div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">fill ratio</div>
+          <div class="metric-value" id="metric-fill">—</div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">est. FP rate</div>
+          <div class="metric-value" id="metric-fp">—</div>
+        </div>
+      </div>
+    </div>
+    <div class="hero-right">
+      <canvas id="bit-canvas" width="480" height="360"></canvas>
+      <div class="bit-caption">bit array (sampled to grid)</div>
+    </div>
+  </section>
+
+  <!-- CONTROLS -->
+  <section class="panel controls">
+    <div class="panel-head">
+      <span class="panel-num">01</span>
+      <h2>Feed items in</h2>
+      <span class="panel-note">queue → bloom filter → BST verify → log</span>
+    </div>
+    <div class="control-row">
+      <input id="item-input" type="text" placeholder="type a username, email, url…" autocomplete="off" />
+      <button class="btn btn-primary" id="add-btn">Add</button>
+      <button class="btn" id="seed-btn">Seed 50 random</button>
+      <button class="btn btn-ghost" id="reset-btn">Reset filter</button>
+    </div>
+    <div class="stat-strip">
+      <div class="stat"><span class="stat-num" id="stat-added">0</span><span class="stat-label">items added</span></div>
+      <div class="stat"><span class="stat-num" id="stat-dupes">0</span><span class="stat-label">duplicates caught</span></div>
+      <div class="stat"><span class="stat-num warn" id="stat-fp">0</span><span class="stat-label">false positives seen</span></div>
+      <div class="stat"><span class="stat-num" id="stat-log">0</span><span class="stat-label">items in log</span></div>
+    </div>
+  </section>
+
+  <div class="grid-2">
+    <!-- ACTIVITY FEED -->
+    <section class="panel">
+      <div class="panel-head">
+        <span class="panel-num">—</span>
+        <h2>Activity feed</h2>
+        <span class="panel-note">most recent first</span>
+      </div>
+      <ul class="feed" id="feed-list">
+        <li class="feed-empty">Nothing yet — add an item above.</li>
+      </ul>
+    </section>
+
+    <!-- STACK TRACE + BST -->
+    <section class="panel">
+      <div class="panel-head">
+        <span class="panel-num">01/02</span>
+        <h2>Operation trace &amp; sorted log</h2>
+        <span class="panel-note">stack (Phase 1) · BST inorder (Phase 2)</span>
+      </div>
+      <div class="split">
+        <div>
+          <div class="split-label">stack, top → down</div>
+          <ol class="mono-list" id="stack-list"><li class="muted">empty</li></ol>
+        </div>
+        <div>
+          <div class="split-label">BST inorder (sorted)</div>
+          <ol class="mono-list" id="bst-list"><li class="muted">empty</li></ol>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <!-- COLLISION GRAPH -->
+  <section class="panel">
+    <div class="panel-head">
+      <span class="panel-num">02</span>
+      <h2>Collision graph</h2>
+      <span class="panel-note">items linked when they share a set bit — false-positive risk clusters</span>
+    </div>
+    <div class="graph-wrap">
+      <svg id="graph-svg" viewBox="0 0 600 360"></svg>
+      <div class="graph-side">
+        <div class="metric">
+          <div class="metric-label">nodes shown</div>
+          <div class="metric-value" id="graph-nodes">0</div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">bit-sharing clusters</div>
+          <div class="metric-value" id="graph-clusters">0</div>
+        </div>
+        <button class="btn" id="graph-refresh">Refresh graph</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- BENCHMARK -->
+  <section class="panel">
+    <div class="panel-head">
+      <span class="panel-num">03</span>
+      <h2>Search &amp; sort benchmark</h2>
+      <span class="panel-note">same lookup, four structures</span>
+    </div>
+    <div class="control-row">
+      <button class="btn btn-primary" id="bench-btn">Run benchmark on a random item</button>
+      <span id="bench-target" class="muted"></span>
+    </div>
+    <table class="data-table" id="bench-table">
+      <thead>
+        <tr><th>method</th><th>found</th><th>steps</th><th>time (µs)</th></tr>
+      </thead>
+      <tbody><tr><td colspan="4" class="muted">Run the benchmark to see results.</td></tr></tbody>
+    </table>
+  </section>
+
+  <!-- GREEDY ALLOCATOR -->
+  <section class="panel">
+    <div class="panel-head">
+      <span class="panel-num">04</span>
+      <h2>Greedy bit-budget allocation</h2>
+      <span class="panel-note">splitting a fixed bit budget across 3 hypothetical filter categories</span>
+    </div>
+    <div class="control-row">
+      <button class="btn btn-primary" id="greedy-btn">Run allocation</button>
+    </div>
+    <div id="greedy-bars" class="greedy-bars"></div>
+  </section>
+
+</main>
+
+<footer>
+  BloomGuard — linked list · stack · queue · BST · graph · sort/search · greedy allocation, wrapped around one Bloom filter.
+</footer>
+
+<script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>
